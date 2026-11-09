@@ -2178,6 +2178,7 @@ class NotificationService(
         "RMB": "元",
         "CNH": "元",
         "TWD": "新台币",  # 台股 (TWSE/TPEx) 以新台币计价，避免与 A 股「元」(人民币) 混淆
+        "KRW": "원",
     }
 
     @classmethod
@@ -2194,6 +2195,12 @@ class NotificationService(
             return "N/A"
         sign = "-" if amount < 0 else ""
         abs_amount = abs(amount)
+        if (currency or "").upper() == "KRW":
+            if abs_amount >= 1e12:
+                return f"{sign}{abs_amount / 1e12:,.2f}조 원"
+            if abs_amount >= 1e8:
+                return f"{sign}{abs_amount / 1e8:,.0f}억 원"
+            return f"{sign}{abs_amount:,.0f}원"
         suffix = cls._CURRENCY_SUFFIX.get((currency or "").upper(), "元")
         if abs_amount >= 1e8:
             return f"{sign}{abs_amount / 1e8:.2f} 亿{suffix}"
@@ -2216,6 +2223,8 @@ class NotificationService(
             return "N/A"
         if amount != amount:  # NaN
             return "N/A"
+        if (currency or "").upper() == "KRW":
+            return f"{amount:,.0f}원"
         suffix = cls._CURRENCY_SUFFIX.get((currency or "").upper(), "元")
         return f"{amount:.4f} {suffix}"
 
