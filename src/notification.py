@@ -1252,6 +1252,65 @@ class NotificationService(
             signal_tag,
         )
 
+    _KR_NAME_HINTS = {
+        "005930": "삼성전자", "000660": "SK하이닉스", "373220": "LG에너지솔루션",
+        "207940": "삼성바이오로직스", "005380": "현대차", "000270": "기아",
+        "035420": "NAVER", "035720": "카카오", "068270": "셀트리온", "005490": "POSCO홀딩스",
+        "051910": "LG화학", "006400": "삼성SDI", "105560": "KB금융", "055550": "신한지주",
+        "012330": "현대모비스", "028260": "삼성물산", "066570": "LG전자", "003550": "LG",
+    }
+
+    @staticmethod
+    def _tldr_reason(text: Any, limit: int = 48) -> str:
+        import re
+        sentence = re.sub(r"\s+", " ", str(text or "")).strip()
+        if not sentence:
+            return ""
+        if "므로 " in sentence:
+            sentence = sentence.split("므로 ", 1)[1]
+        sentence = re.split(r"[.。;；]", sentence)[0].strip()
+        sentence = re.sub(r"(해야 합니다|하세요|합니다|입니다)$", "", sentence).strip()
+        if len(sentence) > limit:
+            sentence = sentence[:limit].rstrip(" ,") + "…"
+        return sentence
+
+    def _append_tldr_block(
+        self,
+        lines: List[str],
+        sorted_results: List[AnalysisResult],
+        report_language: str,
+        buy_count: int,
+        hold_count: int,
+        sell_count: int,
+    ) -> None:
+        """Korean '한마디로 정리' block: overall verdict + one line per stock."""
+        if report_language != "ko" or not sorted_results:
+            return
+        total = len(sorted_results)
+        if sell_count == total:
+            verdict = f"{total}종목 모두 약세 신호예요. 오늘은 신규 매수를 쉬어가세요." if total > 1 else "약세 신호예요. 오늘은 신규 매수를 쉬어가세요."
+        elif buy_count == total:
+            verdict = "모두 매수 신호예요. 한 번에 사지 말고 나눠서 접근하세요."
+        elif buy_count > sell_count:
+            verdict = f"매수 쪽이 우세해요 (매수 {buy_count} · 관망 {hold_count} · 매도 {sell_count})."
+        elif sell_count > buy_count:
+            verdict = f"매도 쪽이 우세해요 (매수 {buy_count} · 관망 {hold_count} · 매도 {sell_count}). 보수적으로 대응하세요."
+        else:
+            verdict = f"뚜렷한 방향이 없어요 (매수 {buy_count} · 관망 {hold_count} · 매도 {sell_count}). 지켜보는 게 좋아요."
+        lines.extend(["", "## 💬 한마디로 정리", "", f"> {verdict}", ""])
+        for r in sorted_results:
+            signal_text, signal_emoji, _ = self._get_signal_level(r)
+            code = str(getattr(r, "code", "") or "")
+            name = self._KR_NAME_HINTS.get(code.split(".")[0]) or self._get_display_name(r, report_language)
+            dashboard = getattr(r, "dashboard", None) or {}
+            core = dashboard.get("core_conclusion", {}) if isinstance(dashboard, dict) else {}
+            reason = self._tldr_reason(core.get("one_sentence") or getattr(r, "analysis_summary", ""))
+            line = f"- {signal_emoji} **{name}** · {signal_text} ({r.sentiment_score}점)"
+            if reason:
+                line += f": {reason}"
+            lines.append(line)
+        lines.extend(["", "---", ""])
+
     def generate_dashboard_report(
         self,
         results: List[AnalysisResult],
@@ -1316,6 +1375,7 @@ class NotificationService(
             f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count}",
         ]
         self._append_market_status_line(report_lines, results, report_language)
+        self._append_tldr_block(report_lines, sorted_results, report_language, buy_count, hold_count, sell_count)
 
         # === 新增：分析结果摘要 (Issue #112) ===
         if results:
