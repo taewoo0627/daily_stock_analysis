@@ -1789,6 +1789,46 @@ Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
             else "报告要像交易员盘后工作台：先给结论，再按指数、新闻催化和计划展开"
         )
 
+        if self._get_output_language() == "ko":
+            return f"""너는 주식을 막 시작한 대학생에게 오늘 시장을 설명해주는 친절한 선배야. 아래 데이터로 아주 짧은 시장 요약을 써줘.
+
+[규칙]
+- 순수 Markdown만 출력하고 JSON이나 코드블록은 쓰지 마
+- 전부 한국어, 친근한 해요체(~했어요, ~예요)
+- 제목 빼고 전체 6줄 이내, 각 줄은 한 문장
+- 어려운 금융 용어(모멘텀, 수급, 펀더멘털, 밸류에이션, 사이드카, 차익 실현, 숨고르기, 저항선, 지지선, 마디, 긴축, 변동성, 리스크 등)는 쓰지 말고 쉬운 말로 풀어 써. 예: 차익 실현 -> 오른 주식을 팔아 이익을 챙기는 것, 긴축 -> 금리를 올려 돈줄을 죄는 것
+- 데이터에 없는 숫자는 절대 만들지 마
+{data_boundary_requirement}
+
+# 오늘 시장 데이터
+
+## 날짜
+{overview.date}
+
+## 주요 지수
+{indices_placeholder}
+
+{data_limits_block}
+
+## 시장 뉴스
+{news_placeholder}
+
+{data_no_indices_hint}
+
+# 출력 형식 (이대로)
+
+## 📊 {overview.date} 오늘 시장 한눈에
+
+> (오늘 시장 분위기를 한 줄로)
+
+- **코스피**: (숫자와 등락률, 왜 그랬는지 한마디)
+- **코스닥**: (숫자와 등락률, 왜 그랬는지 한마디)
+- **오늘의 이슈**: (가장 중요한 뉴스 한 줄, 쉬운 말로)
+- **내일 볼 것**: (한 줄)
+
+리포트 본문만 출력해.
+"""
+
         if review_language == "en":
             report_title = self._get_review_title(overview.date).removeprefix("## ").strip()
             return f"""You are a professional {self._get_market_scope_name('en')} analyst. Please produce a concise market recap report based on the data below.
