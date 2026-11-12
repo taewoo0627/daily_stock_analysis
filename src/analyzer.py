@@ -2739,6 +2739,7 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
 - Plain-language style (very important): the reader is a college student who is new to stocks. Write short, easy, everyday Korean in friendly 해요체 (~해요, ~예요). Never use 합쇼체 such as ~하십시오/~합니다.
 - Avoid financial jargon in every human-readable text value (except `operation_advice`, which keeps its usual short label such as 매수/관망/비중축소/매도). Do not write words like 역배열, 정배열, 이격도, 매물대, 수급, 모멘텀, 펀더멘털, 밸류에이션, 센티먼트, 촉매, 캡엑스, 추격 매수, 지지선, 저항선, MA5/MA10/MA20. Say it plainly instead, for example: "최근 주가가 계속 내려가는 흐름이에요", "20일 평균 가격(약 383달러)", "사려는 사람이 적어요", "회사 실적이 좋아요", "주가가 비싼 편이에요", "오를 때 따라 사지 마세요", "가진 주식을 조금 팔아요", "이 가격 아래로 떨어지면 팔아요".
 - Keep `one_sentence` under 45 Korean characters, and keep each risk alert, positive catalyst, and position advice to one short sentence.
+- The decision must follow the scoring scale above: a score of 20-39 means Reduce (operation_advice 비중축소) and 0-19 means Sell (매도); do not soften a low score into Watch/관망. Make `one_sentence` say the same thing as the score.
 """
         return base_prompt + """
 
@@ -5125,6 +5126,7 @@ Output the complete Decision Dashboard in JSON format."""
 - Plain-language style (very important): the reader is a college student who is new to stocks. Write short, easy, everyday Korean in friendly 해요체 (~해요, ~예요). Never use 합쇼체 such as ~하십시오/~합니다.
 - Avoid financial jargon in every human-readable text value (except `operation_advice`, which keeps its usual short label such as 매수/관망/비중축소/매도). Do not write words like 역배열, 정배열, 이격도, 매물대, 수급, 모멘텀, 펀더멘털, 밸류에이션, 센티먼트, 촉매, 캡엑스, 추격 매수, 지지선, 저항선, MA5/MA10/MA20. Say it plainly instead, for example: "최근 주가가 계속 내려가는 흐름이에요", "20일 평균 가격(약 383달러)", "사려는 사람이 적어요", "회사 실적이 좋아요", "주가가 비싼 편이에요", "오를 때 따라 사지 마세요", "가진 주식을 조금 팔아요", "이 가격 아래로 떨어지면 팔아요".
 - Keep `one_sentence` under 45 Korean characters, and keep each risk alert, positive catalyst, and position advice to one short sentence.
+- The decision must follow the scoring scale above: a score of 20-39 means Reduce (operation_advice 비중축소) and 0-19 means Sell (매도); do not soften a low score into Watch/관망. Make `one_sentence` say the same thing as the score.
 """
         else:
             prompt += f"""
