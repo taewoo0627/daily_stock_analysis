@@ -1258,6 +1258,7 @@ class NotificationService(
         "035420": "NAVER", "035720": "카카오", "068270": "셀트리온", "005490": "POSCO홀딩스",
         "051910": "LG화학", "006400": "삼성SDI", "105560": "KB금융", "055550": "신한지주",
         "012330": "현대모비스", "028260": "삼성물산", "066570": "LG전자", "003550": "LG",
+        "034220": "LG디스플레이", "TSLA": "테슬라", "NVDA": "엔비디아",
     }
 
     @staticmethod
@@ -1301,7 +1302,7 @@ class NotificationService(
         for r in sorted_results:
             signal_text, signal_emoji, _ = self._get_signal_level(r)
             code = str(getattr(r, "code", "") or "")
-            name = self._KR_NAME_HINTS.get(code.split(".")[0]) or self._get_display_name(r, report_language)
+            name = self._KR_NAME_HINTS.get(code.split(".")[0].upper()) or self._get_display_name(r, report_language)
             dashboard = getattr(r, "dashboard", None) or {}
             core = dashboard.get("core_conclusion", {}) if isinstance(dashboard, dict) else {}
             reason = self._tldr_reason(core.get("one_sentence") or getattr(r, "analysis_summary", ""))
