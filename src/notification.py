@@ -2040,7 +2040,25 @@ class NotificationService(
             return "\n".join(lines)
 
         sorted_results = sorted(results, key=lambda x: x.sentiment_score or 0, reverse=True)
-        buy_count, sell_count, hold_count = self._count_display_decisions(results, "ko")
+        def _easy_level(score: Any) -> tuple:
+            try:
+                s = float(score or 0)
+            except (TypeError, ValueError):
+                s = 50.0
+            if s >= 80:
+                return ("적극 사볼 만함", "🟢", "buy")
+            if s >= 60:
+                return ("사볼 만함", "🟢", "buy")
+            if s >= 40:
+                return ("지켜보기", "⚪", "hold")
+            if s >= 20:
+                return ("조금 팔기", "🟠", "sell")
+            return ("팔기", "🔴", "sell")
+
+        levels = [_easy_level(getattr(x, "sentiment_score", None)) for x in results]
+        buy_count = sum(1 for lv in levels if lv[2] == "buy")
+        sell_count = sum(1 for lv in levels if lv[2] == "sell")
+        hold_count = sum(1 for lv in levels if lv[2] == "hold")
         total = len(results)
         counts = f"사기 {buy_count} · 지켜보기 {hold_count} · 줄이기 {sell_count}"
         if sell_count == total:
@@ -2061,12 +2079,7 @@ class NotificationService(
             ("관망", "지켜보기"), ("보유", "지켜보기"),
         )
         for r in sorted_results:
-            signal_text, emoji, _ = self._get_signal_level(r)
-            easy_signal = str(signal_text or "")
-            for old, new in signal_words:
-                if old in easy_signal:
-                    easy_signal = new
-                    break
+            easy_signal, emoji, _ = _easy_level(getattr(r, "sentiment_score", None))
             code = str(getattr(r, "code", "") or "")
             name = self._KR_NAME_HINTS.get(code.split(".")[0].upper()) or self._get_display_name(r, "ko")
             is_krw = code.upper().endswith((".KS", ".KQ"))
