@@ -2021,6 +2021,128 @@ class NotificationService(
             return ""
         return f"{value:,.0f}원" if is_krw else f"{value:,.2f}달러"
 
+    # ---- 1년 흐름 + 성적표 (쉬운 한국어 브리핑용) ----
+    _EASY_KO_HIST_CACHE: Dict[str, Any] = {}
+    _TRACK_LOG_PATH = "track_record/score_log.csv"
+    _TRACK_HORIZON = 20
+
+    @classmethod
+    def _easy_ko_history(cls, code: str) -> List[Tuple[str, float]]:
+        """최근 2년 일별 종가 [(YYYY-MM-DD, close)]. 실패하면 빈 리스트."""
+        if code in cls._EASY_KO_HIST_CACHE:
+            return cls._EASY_KO_HIST_CACHE[code]
+        series: List[Tuple[str, float]] = []
+        try:
+            import yfinance as yf
+            df = yf.Ticker(code).history(period="2y", auto_adjust=False)
+            if df is not None and not df.empty and "Close" in df:
+                for idx, val in df["Close"].dropna().items():
+                    series.append((idx.strftime("%Y-%m-%d"), float(val)))
+        except Exception as exc:
+            logger.warning("[easy_ko] %s 장기 데이터 조회 실패: %s", code, exc)
+        cls._EASY_KO_HIST_CACHE[code] = series
+        return series
+
+    @staticmethod
+    def _easy_ko_longterm_line(series: List[Tuple[str, float]]) -> str:
+        if len(series) < 120:
+            return ""
+        closes = [c for _, c in series]
+        last = closes[-1]
+        year = closes[-250:]
+        hi = max(year)
+        from_hi = (last / hi - 1) * 100
+        ret_1y = (last / year[0] - 1) * 100
+        parts = []
+        if from_hi > -2:
+            parts.append("1년 중 최고가 근처예요")
+        else:
+            parts.append(f"1년 최고가보다 {abs(from_hi):.0f}% 낮아요")
+        parts.append(f"1년 전보다 {ret_1y:+.0f}%")
+        if len(closes) >= 200:
+            ma200 = sum(closes[-200:]) / 200
+            parts.append("200일 평균보다 위" if last >= ma200 else "200일 평균보다 아래")
+        return "📅 길게 보면: " + ", ".join(parts)
+
+    def _easy_ko_track_record(
+        self,
+        entries: List[Tuple[str, int, List[Tuple[str, float]]]],
+    ) -> List[str]:
+        """오늘 점수를 기록하고, 20거래일 지난 기록을 채점해서 성적표 줄을 돌려준다."""
+        import csv
+        import os
+        path = self._TRACK_LOG_PATH
+        horizon = self._TRACK_HORIZON
+        rows: List[Dict[str, str]] = []
+        try:
+            if os.path.exists(path):
+                with open(path, newline="", encoding="utf-8") as f:
+                    rows = [dict(x) for x in csv.DictReader(f)]
+        except Exception as exc:
+            logger.warning("[easy_ko] 성적표 읽기 실패: %s", exc)
+            rows = []
+
+        series_by_code: Dict[str, List[Tuple[str, float]]] = {}
+        for code, score, series in entries:
+            if not series:
+                continue
+            series_by_code[code] = series
+            day, price = series[-1]
+            rows = [x for x in rows if not (x.get("date") == day and x.get("code") == code)]
+            rows.append({"date": day, "code": code, "score": str(int(score)), "price": f"{price:.4f}"})
+
+        try:
+            folder = os.path.dirname(path)
+            if folder:
+                os.makedirs(folder, exist_ok=True)
+            rows.sort(key=lambda x: (x.get("date", ""), x.get("code", "")))
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=["date", "code", "score", "price"])
+                writer.writeheader()
+                writer.writerows(rows)
+        except Exception as exc:
+            logger.warning("[easy_ko] 성적표 저장 실패: %s", exc)
+
+        graded: List[Tuple[int, float]] = []
+        for x in rows:
+            series = series_by_code.get(x.get("code", ""))
+            if not series:
+                continue
+            dates = [d for d, _ in series]
+            if x.get("date") not in dates:
+                continue
+            i = dates.index(x["date"])
+            if i + horizon >= len(series):
+                continue
+            try:
+                ret = (series[i + horizon][1] / float(x["price"]) - 1) * 100
+                graded.append((int(float(x["score"])), ret))
+            except (TypeError, ValueError, ZeroDivisionError):
+                continue
+
+        if not graded:
+            first = rows[0].get("date", "") if rows else ""
+            since = f" ({first}부터)" if first else ""
+            return [f"📋 성적표: 점수 기록을 모으는 중이에요{since}. 20거래일(약 한 달) 뒤부터 맞았는지 채점해요."]
+
+        parts = []
+        buys = [r for s, r in graded if s >= 60]
+        sells = [r for s, r in graded if s < 40]
+        if buys:
+            hit = sum(1 for r in buys if r > 0) / len(buys) * 100
+            parts.append(f"사볼 만함 {len(buys)}번 중 {hit:.0f}% 맞음 (평균 {sum(buys) / len(buys):+.1f}%)")
+        if sells:
+            hit = sum(1 for r in sells if r < 0) / len(sells) * 100
+            parts.append(f"팔기 쪽 {len(sells)}번 중 {hit:.0f}% 맞음 (평균 {sum(sells) / len(sells):+.1f}%)")
+        if not parts:
+            parts.append("아직 사기/팔기 신호가 채점된 적은 없어요")
+        all_avg = sum(r for _, r in graded) / len(graded)
+        return [
+            f"📋 성적표 (점수 낸 뒤 20거래일 결과, 채점 {len(graded)}건)",
+            " · ".join(parts),
+            f"비교용: 채점된 전체 평균 {all_avg:+.1f}%",
+        ]
+
     def _generate_easy_ko_brief(
         self,
         results: List[AnalysisResult],
@@ -2078,6 +2200,7 @@ class NotificationService(
             ("비중 축소", "조금 팔기"), ("매수", "사볼 만함"), ("매도", "팔기"),
             ("관망", "지켜보기"), ("보유", "지켜보기"),
         )
+        track_entries: List[Tuple[str, int, List[Tuple[str, float]]]] = []
         for r in sorted_results:
             easy_signal, emoji, _ = _easy_level(getattr(r, "sentiment_score", None))
             code = str(getattr(r, "code", "") or "")
@@ -2102,6 +2225,11 @@ class NotificationService(
                         pct_text = f" (전날보다 {sign}{pct_num:.2f}%)"
                 lines.append(f"💵 {self._easy_ko_money(price, is_krw)}{pct_text}")
 
+            series = self._easy_ko_history(code)
+            track_entries.append((code, int(r.sentiment_score or 0), series))
+            longterm = self._easy_ko_longterm_line(series)
+            if longterm:
+                lines.append(longterm)
             one = self._easy_ko_text(core.get("one_sentence") or getattr(r, "analysis_summary", ""), limit=70)
             if one:
                 lines.append(f"👉 {one}")
@@ -2130,7 +2258,12 @@ class NotificationService(
                 lines.append(" · ".join(price_bits))
             lines.append("")
 
-        lines.append("_점수는 100점에 가까울수록 오를 가능성이 높다는 뜻이에요. 투자 판단은 본인 몫!_")
+        try:
+            lines.extend(self._easy_ko_track_record(track_entries))
+            lines.append("")
+        except Exception as exc:
+            logger.warning("[easy_ko] 성적표 생성 실패: %s", exc)
+        lines.append("_점수는 며칠~몇 주 흐름을 본 참고용이에요. 투자 판단은 본인 몫!_")
         return "\n".join(lines)
 
 
