@@ -444,6 +444,8 @@ class NotificationService(
     ) -> str:
         """Generate the aggregate report content used by merge/save/push paths."""
         normalized_type = self._normalize_report_type(report_type)
+        if normalized_type != ReportType.FULL and self._get_report_language(results) == "ko":
+            return self._generate_easy_ko_brief(results, report_date=report_date)
         if normalized_type == ReportType.BRIEF:
             return self.generate_brief_report(results, report_date=report_date)
         return self.generate_dashboard_report(results, report_date=report_date)
@@ -1951,6 +1953,173 @@ class NotificationService(
         content = "\n".join(lines)
 
         return content
+
+    # ---- 쉬운 한국어 요약 브리핑 (Telegram용) ----
+    _EASY_KO_TERMS = (
+        ("이동평균선 역배열", "주가가 계속 내려가는 흐름"), ("이동평균선 정배열", "주가가 계속 오르는 흐름"),
+        ("이평선 역배열", "주가가 계속 내려가는 흐름"), ("이평선 정배열", "주가가 계속 오르는 흐름"),
+        ("강한 역배열", "뚜렷한 내림세"), ("역배열", "내림세"), ("정배열", "오름세"),
+        ("MA120", "120일 평균가"), ("MA60", "60일 평균가"), ("MA20", "20일 평균가"),
+        ("MA10", "10일 평균가"), ("MA5", "5일 평균가"),
+        ("이동평균선", "평균 가격선"), ("이평선", "평균 가격선"),
+        ("비중 축소", "보유량 줄이기"), ("비중축소", "보유량 줄이기"),
+        ("추격 매수", "따라 사기"), ("추격매수", "따라 사기"),
+        ("이격도", "평균가와의 차이"), ("매물대", "많이 거래된 가격대"),
+        ("수급", "사고파는 흐름"), ("모멘텀", "상승 힘"), ("펀더멘털", "회사 실적"),
+        ("밸류에이션", "주가 수준"), ("센티먼트", "분위기"), ("투자심리", "분위기"),
+        ("지지선", "버팀 가격"), ("저항선", "막히는 가격"), ("촉매", "호재"),
+        ("캡엑스(CapEx)", "설비 투자"), ("캡엑스", "설비 투자"), ("CapEx", "설비 투자"),
+        ("리스크", "위험"), ("관망세", "눈치 보기"), ("관망하", "지켜보"), ("관망", "지켜보기"),
+        ("하십시오", "하세요"), ("십시오", "세요"), ("권장합니다", "추천해요"), ("권장", "추천"),
+    )
+
+    @classmethod
+    def _easy_ko_text(cls, text: Any, limit: int = 55) -> str:
+        import re
+        s = re.sub(r"\s+", " ", str(text or "")).strip()
+        s = re.sub(r"^(Risk|Catalyst|Check|위험|호재|리스크|체크|촉매)\s*\d*\s*[:：]\s*", "", s, flags=re.I)
+        s = re.sub(r"^\[?\d{4}-\d{2}-\d{2}\]?\s*[:：]?\s*", "", s)
+        s = re.sub(r"^\[[^\]]{1,12}\]\s*", "", s)
+        for old, new in cls._EASY_KO_TERMS:
+            s = s.replace(old, new)
+        s = s.strip(" -")
+        if len(s) > limit:
+            s = s[:limit].rstrip(" ,") + "…"
+        return s
+
+    @staticmethod
+    def _easy_ko_first_item(items: Any) -> str:
+        if not items:
+            return ""
+        if isinstance(items, str):
+            return items
+        if isinstance(items, (list, tuple)):
+            first = items[0]
+            if isinstance(first, dict):
+                return str(first.get("content") or first.get("text") or first.get("title") or "")
+            return str(first or "")
+        return ""
+
+    @staticmethod
+    def _easy_ko_number(value: Any) -> Optional[float]:
+        import re
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value) if value == value else None
+        m = re.search(r"(?<![A-Za-z\d.,])(\d[\d,]*(?:\.\d+)?)", str(value))
+        if not m:
+            return None
+        try:
+            return float(m.group(1).replace(",", ""))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _easy_ko_money(value: Optional[float], is_krw: bool) -> str:
+        if value is None:
+            return ""
+        return f"{value:,.0f}원" if is_krw else f"{value:,.2f}달러"
+
+    def _generate_easy_ko_brief(
+        self,
+        results: List[AnalysisResult],
+        report_date: Optional[str] = None,
+    ) -> str:
+        """짧고 쉬운 한국어 브리핑: 종목당 4~6줄."""
+        if report_date is None:
+            report_date = datetime.now().strftime('%Y-%m-%d')
+        try:
+            _d = datetime.strptime(str(report_date)[:10], '%Y-%m-%d')
+            date_label = f"{_d.month}월 {_d.day}일"
+        except ValueError:
+            date_label = str(report_date)
+        lines: List[str] = [f"# 📈 {date_label} 주식 브리핑", ""]
+        if not results:
+            lines.append("오늘은 분석된 종목이 없어요.")
+            return "\n".join(lines)
+
+        sorted_results = sorted(results, key=lambda x: x.sentiment_score or 0, reverse=True)
+        buy_count, sell_count, hold_count = self._count_display_decisions(results, "ko")
+        total = len(results)
+        counts = f"사기 {buy_count} · 지켜보기 {hold_count} · 줄이기 {sell_count}"
+        if sell_count == total:
+            verdict = "전부 약한 신호예요. 오늘은 새로 사지 말고 쉬어가요."
+        elif buy_count == total:
+            verdict = "전부 좋은 신호예요. 그래도 한 번에 다 사지 말고 나눠서 사요."
+        elif sell_count > buy_count and sell_count >= hold_count:
+            verdict = f"파는 쪽 신호가 많아요 ({counts}). 조심하는 게 좋아요."
+        elif buy_count > sell_count and buy_count >= hold_count:
+            verdict = f"사는 쪽 신호가 많아요 ({counts}). 그래도 나눠서 천천히 사요."
+        else:
+            verdict = f"뚜렷한 방향이 없어요 ({counts}). 지켜보는 게 좋아요."
+        lines.extend([f"> 💬 {verdict}", ""])
+
+        signal_words = (
+            ("강력매수", "적극 매수"), ("강력 매수", "적극 매수"), ("비중축소", "조금 팔기"),
+            ("비중 축소", "조금 팔기"), ("매수", "사볼 만함"), ("매도", "팔기"),
+            ("관망", "지켜보기"), ("보유", "지켜보기"),
+        )
+        for r in sorted_results:
+            signal_text, emoji, _ = self._get_signal_level(r)
+            easy_signal = str(signal_text or "")
+            for old, new in signal_words:
+                if old in easy_signal:
+                    easy_signal = new
+                    break
+            code = str(getattr(r, "code", "") or "")
+            name = self._KR_NAME_HINTS.get(code.split(".")[0].upper()) or self._get_display_name(r, "ko")
+            is_krw = code.upper().endswith((".KS", ".KQ"))
+            dash = getattr(r, "dashboard", None) or {}
+            core = dash.get("core_conclusion", {}) or {}
+            intel = dash.get("intelligence", {}) or {}
+            plan = (dash.get("battle_plan", {}) or {}).get("sniper_points", {}) or {}
+            snap = getattr(r, "market_snapshot", None) or {}
+
+            lines.append(f"**{emoji} {name}** · {easy_signal} ({r.sentiment_score}점)")
+
+            price = self._easy_ko_number(snap.get("price") or snap.get("close"))
+            if price:
+                pct = str(snap.get("pct_chg") or "").strip()
+                pct_text = ""
+                if pct and pct.upper() != "N/A":
+                    pct_num = self._easy_ko_number(pct)
+                    if pct_num is not None:
+                        sign = "-" if pct.startswith("-") else "+"
+                        pct_text = f" (전날보다 {sign}{pct_num:.2f}%)"
+                lines.append(f"💵 {self._easy_ko_money(price, is_krw)}{pct_text}")
+
+            one = self._easy_ko_text(core.get("one_sentence") or getattr(r, "analysis_summary", ""), limit=70)
+            if one:
+                lines.append(f"👉 {one}")
+            good = self._easy_ko_text(self._easy_ko_first_item(intel.get("positive_catalysts")))
+            if good:
+                lines.append(f"👍 {good}")
+            bad = self._easy_ko_text(self._easy_ko_first_item(intel.get("risk_alerts")))
+            if bad:
+                lines.append(f"⚠️ {bad}")
+
+            def _sane(v: Optional[float]) -> Optional[float]:
+                if v is None or v <= 0:
+                    return None
+                if price and not (price * 0.3 <= v <= price * 3):
+                    return None
+                return v
+
+            target = _sane(self._easy_ko_number(plan.get("take_profit")))
+            stop = _sane(self._easy_ko_number(plan.get("stop_loss")))
+            price_bits = []
+            if target:
+                price_bits.append(f"🎯 목표 {self._easy_ko_money(target, is_krw)}")
+            if stop:
+                price_bits.append(f"🛑 {self._easy_ko_money(stop, is_krw)} 밑으로 가면 팔기")
+            if price_bits:
+                lines.append(" · ".join(price_bits))
+            lines.append("")
+
+        lines.append("_점수는 100점에 가까울수록 오를 가능성이 높다는 뜻이에요. 투자 판단은 본인 몫!_")
+        return "\n".join(lines)
+
 
     def generate_brief_report(
         self,
