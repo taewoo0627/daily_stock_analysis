@@ -31,6 +31,8 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     # 兼容误将 STOCK_LIST 配到同名 Environment variables 的场景；
     # 推荐位置仍是 Settings -> Secrets and variables -> Actions -> Repository variables。
     environment: STOCK_LIST
@@ -560,6 +562,24 @@ jobs:
             python main.py $FORCE_RUN_ARG
           fi
       
+      - name: 성적표 저장 (track record)
+        if: always()
+        run: |
+          if [ -f track_record/score_log.csv ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add track_record/score_log.csv
+            if git diff --cached --quiet; then
+              echo "성적표 변경 없음"
+            else
+              git commit -m "track record: $(date -u +%Y-%m-%d)"
+              git pull --rebase origin main || true
+              git push origin HEAD:main || echo "성적표 저장 실패"
+            fi
+          else
+            echo "성적표 파일 없음"
+          fi
+
       - name: 上传分析报告
         uses: actions/upload-artifact@v6
         if: always()
