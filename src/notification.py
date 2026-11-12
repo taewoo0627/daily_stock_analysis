@@ -2249,6 +2249,10 @@ class NotificationService(
 
             target = _sane(self._easy_ko_number(plan.get("take_profit")))
             stop = _sane(self._easy_ko_number(plan.get("stop_loss")))
+            if price and target and target <= price:
+                target = None
+            if price and stop and stop >= price:
+                stop = None
             price_bits = []
             if target:
                 price_bits.append(f"🎯 목표 {self._easy_ko_money(target, is_krw)}")
